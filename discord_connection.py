@@ -22,7 +22,7 @@ else:
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-tokenizer = SimpleTokenizer()
+tokenizer = SimpleTokenizer(dataset)  # Ensure you pass the dataset to the tokenizer
 
 # Set up the intents
 intents = discord.Intents.default()
