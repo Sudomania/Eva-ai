@@ -1,0 +1,14 @@
+# Ignore .env file containing sensitive information (like the Discord bot token)
+.env
+
+# Ignore Python cache files
+__pycache__/
+*.pyc
+
+# Ignore virtual environment folder (if using a virtual environment)
+venv/
+env/
+
+# Ignore IDE-specific files (optional, depending on your editor)
+.vscode/
+.idea/
