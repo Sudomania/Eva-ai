@@ -12,3 +12,7 @@ env/
 # Ignore IDE-specific files (optional, depending on your editor)
 .vscode/
 .idea/
+
+.env
+*.env
+discord_token.env
