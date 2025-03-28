@@ -27,23 +27,36 @@ class MyBot(discord.Client):
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
         
-        # Initialize tokenizer with dataset
-        self.dataset = load_dataset("neifuisan/Neuro-sama-QnA")
-        self.tokenizer = SimpleTokenizer(self.dataset)
-        
-        # Initialize model
-        self.model = TransformerChatbot(
-            vocab_size=10000,
-            embed_size=256,
-            num_heads=8,
-            num_layers=4,
-            hidden_size=512
-        )
-        self.device = 'cuda' if torch.cuda.is_available() else 'cpu'
-        self.model.to(self.device)
-        self.max_length = 50
-        self.sos_token = 0
-        self.eos_token = 1
+        try:
+            # Load datasets
+            neuro_sama = load_dataset("neifuisan/Neuro-sama-QnA")
+            emotions = load_dataset("sychonix/emotion")
+            
+            # Initialize tokenizer
+            self.tokenizer = SimpleTokenizer()
+            self.tokenizer.build_vocab(neuro_sama, emotions)
+            
+            # Initialize model
+            self.model = TransformerChatbot(
+                vocab_size=self.tokenizer.vocab_size,
+                embed_size=256,
+                num_heads=8,
+                num_layers=4,
+                hidden_size=512
+            )
+            
+            # Set special tokens
+            self.sos_token = self.tokenizer.word_to_idx['<SOS>']
+            self.eos_token = self.tokenizer.word_to_idx['<EOS>']
+            
+            # Device setup
+            self.device = 'cuda' if torch.cuda.is_available() else 'cpu'
+            self.model.to(self.device)
+            self.max_length = 50
+            
+        except Exception as e:
+            print(f"Initialization failed: {str(e)}")
+            raise
 
     async def on_ready(self):
         try:
@@ -53,33 +66,38 @@ class MyBot(discord.Client):
             print(f"Login notification failed: {str(e)}")
 
     def predict_response(self, text):
-        """Final fixed version with correct tensor handling"""
+        """Fixed version with proper token handling"""
         try:
-            # 1. Prepare source tensor [1, seq_len]
-            src = torch.tensor([self.tokenizer.encode(text)], 
-                             dtype=torch.long).to(self.device)
+            # Ensure text is not empty
+            if not text.strip():
+                return "Please say something to me!"
             
-            # 2. Initialize target with SOS token [1, 1]
-            tgt = torch.tensor([[self.sos_token]], 
-                             dtype=torch.long).to(self.device)
+            # Tokenize input
+            token_ids = self.tokenizer.encode(text)
+            if not token_ids:
+                return "I didn't understand that input."
             
-            # 3. Generation loop
+            # Create tensors with proper shapes
+            src = torch.tensor([token_ids], dtype=torch.long).to(self.device)
+            tgt = torch.tensor([[self.sos_token]], dtype=torch.long).to(self.device)
+            
+            # Generation loop
             for _ in range(self.max_length):
-                # Ensure proper shapes for transformer [seq_len, batch_size]
-                src_transposed = src.transpose(0, 1)  # [seq_len, 1]
-                tgt_transposed = tgt.transpose(0, 1)  # [seq_len, 1]
+                # Prepare inputs for transformer
+                src_transposed = src.transpose(0, 1)
+                tgt_transposed = tgt.transpose(0, 1)
                 
                 with torch.no_grad():
                     output = self.model(src_transposed, tgt_transposed)
                 
-                # Get next token and reshape properly [1, 1]
-                next_token = output.argmax(dim=-1)[-1].view(1, 1)
+                # Get next token
+                next_token = output.argmax(dim=-1)[-1].unsqueeze(0).unsqueeze(0)
                 
-                # Stop if EOS token
+                # Stop if EOS token or max length reached
                 if next_token.item() == self.eos_token:
                     break
-                
-                # Append to sequence [1, seq_len+1]
+                    
+                # Append to sequence
                 tgt = torch.cat([tgt, next_token], dim=1)
             
             # Convert to text
@@ -88,16 +106,15 @@ class MyBot(discord.Client):
             for idx in indices:
                 if idx == self.eos_token:
                     break
-                if hasattr(self.tokenizer, 'idx_to_word'):
-                    word = self.tokenizer.idx_to_word.get(idx, f"[UNK:{idx}]")
-                else:
-                    word = str(idx)  # Fallback
+                word = self.tokenizer.idx_to_word.get(idx, '<UNK>')
                 words.append(word)
-            return " ".join(words).strip() or "I didn't understand that."
+            
+            response = ' '.join(words).strip()
+            return response if response else "I'm not sure how to respond to that."
 
         except Exception as e:
             logging.error(f"Generation error: {str(e)}", exc_info=True)
-            return "Sorry, I'm having technical difficulties."
+            return "Sorry, I'm having trouble responding right now."
 
     async def on_message(self, message):
         if message.author == self.user:

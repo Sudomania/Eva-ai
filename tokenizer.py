@@ -1,28 +1,34 @@
 class SimpleTokenizer:
-    def __init__(self, pad_token="<PAD>", sos_token="<SOS>", eos_token="<EOS>", unk_token="<UNK>"):
+    def __init__(self):
+        # Initialize with default special tokens
         self.special_tokens = {
-            'pad_token': pad_token,
-            'sos_token': sos_token,
-            'eos_token': eos_token,
-            'unk_token': unk_token
+            '<PAD>': 0,
+            '<SOS>': 1,
+            '<EOS>': 2,
+            '<UNK>': 3
         }
-        self.word_to_idx = {}
-        self.idx_to_word = {}
-        
-    def build_vocab(self, dataset):
-        # Build vocabulary from dataset
+        self.word_to_idx = {**self.special_tokens}
+        self.idx_to_word = {v: k for k, v in self.special_tokens.items()}
+        self.vocab_size = len(self.special_tokens)
+    
+    def build_vocab(self, neuro_sama, emotions):
+        """Build vocabulary from both datasets"""
         vocab = set()
-        for example in dataset:
-            vocab.update(example['input'].split())
-            vocab.update(example['output'].split())
         
-        # Add special tokens first
-        for i, (key, token) in enumerate(self.special_tokens.items()):
-            self.word_to_idx[token] = i
-            self.idx_to_word[i] = token
+        # Process Neuro-sama dataset
+        for example in neuro_sama['train']:
+            if 'input' in example and 'output' in example:
+                text = f"{example['input']} {example['output']}"
+                vocab.update(text.split())
         
-        # Add other words
-        for i, word in enumerate(vocab, start=len(self.special_tokens)):
+        # Process emotions dataset
+        for example in emotions['train']:
+            if 'text' in example and 'label' in example:
+                text = f"How are you feeling about {example['text']}? I feel {example['label']} about it."
+                vocab.update(text.split())
+        
+        # Add words to vocabulary
+        for i, word in enumerate(vocab, start=self.vocab_size):
             self.word_to_idx[word] = i
             self.idx_to_word[i] = word
         
@@ -30,10 +36,9 @@ class SimpleTokenizer:
     
     def encode(self, text):
         return [
-            self.word_to_idx.get(word, self.word_to_idx[self.special_tokens['unk_token']])
+            self.word_to_idx.get(word, self.special_tokens['<UNK>'])
             for word in text.split()
         ]
     
-    @property
-    def pad_token_id(self):
-        return self.word_to_idx[self.special_tokens['pad_token']]
+    def decode(self, token_ids):
+        return ' '.join([self.idx_to_word.get(tid, '<UNK>') for tid in token_ids])
