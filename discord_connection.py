@@ -57,18 +57,27 @@ class MyBot(discord.Client):
 
         input_text = message.content
         input_tokens = tokenizer.encode(input_text)
-        
+
+        # Ensure the model is in evaluation mode
         model.eval()
+        
+        # Convert input tokens to a tensor and add batch dimension
         input_tensor = torch.tensor(input_tokens).unsqueeze(0)
 
         with torch.no_grad():
             response_tensor = model(input_tensor, input_tensor)
         
-        # Log the raw response tensor from the model
+        # Log the raw model output tensor
         logger.info(f"Raw model response tensor: {response_tensor}")
 
-        # Now decode the response
-        response = tokenizer.decode(response_tensor[0].tolist())
+        # Get the most probable tokens at each position
+        response_ids = torch.argmax(response_tensor, dim=-1)
+
+        # Decode the response tokens into text
+        response = tokenizer.decode(response_ids[0].tolist())
+
+        # Log the decoded response
+        logger.info(f"Decoded response: {response}")
 
         if len(response) > 4000:
             response = response[:4000]
@@ -76,9 +85,10 @@ class MyBot(discord.Client):
         if not response.strip():
             response = "I'm sorry, I couldn't generate a response. Please try again later."
 
+        # Sanitize the response (remove any non-printable characters)
         response = ''.join(c for c in response if 32 <= ord(c) <= 126)
 
-        logger.info(f"Generated response: {response}")
+        logger.info(f"Final generated response: {response}")
 
         await message.channel.send(response)
 

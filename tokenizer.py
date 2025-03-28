@@ -1,6 +1,13 @@
 class SimpleTokenizer:
-    def __init__(self):
-        pass  # No predefined vocabulary
+    def __init__(self, dataset):
+        # Create vocab from dataset
+        self.vocab = set()
+        for text in dataset:
+            self.vocab.update(text.split())  # Simple whitespace-based tokenization
+        self.vocab = {word: idx for idx, word in enumerate(self.vocab)}
+
+    def tokenize(self, text):
+        return [self.vocab[word] for word in text.split()]
 
     def encode(self, text):
         return [ord(c) for c in text]  # Convert characters to Unicode numbers
