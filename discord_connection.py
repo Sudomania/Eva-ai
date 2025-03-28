@@ -1,5 +1,5 @@
 import discord
-from model import TransformerChatbot
+from model import TransformerChatbot  # Updated for debugging
 from tokenizer import SimpleTokenizer
 import torch
 import logging
@@ -7,14 +7,10 @@ import sys
 from dotenv import load_dotenv
 import os
 
-print(os.path.abspath(".env"))
-load_dotenv(dotenv_path="C:/Users/boogi/Documents/Personal Projects/Eva-ai/.env")
-
+load_dotenv(dotenv_path=".env")  # Ensure it's loading the correct file
 DISCORD_TOKEN = os.getenv("DISCORD_TOKEN")
-print(f"DISCORD_TOKEN: {DISCORD_TOKEN}")
 
 if not DISCORD_TOKEN:
-    print("DISCORD_TOKEN is not found! Check your .env file.")
     raise ValueError("DISCORD_TOKEN not found! Check your .env file.")
 else:
     print(f"DISCORD_TOKEN loaded: {DISCORD_TOKEN[:5]}... (truncated for security)")
@@ -25,22 +21,29 @@ logger = logging.getLogger(__name__)
 
 tokenizer = SimpleTokenizer()  # Initialize the tokenizer
 
-# Set up the intents
-intents = discord.Intents.default()  # You can modify this based on the required events
-intents.message_content = True  # This intent is required to read the message content
+# Define a simple transformer model with random weights
+class SimpleTransformerChatbot(torch.nn.Module):
+    def __init__(self, vocab_size, embed_size, num_heads, num_layers, hidden_size):
+        super(SimpleTransformerChatbot, self).__init__()
+        self.embedding = torch.nn.Embedding(vocab_size, embed_size)
+        self.transformer = torch.nn.Transformer(embed_size, num_heads, num_layers)
+        self.fc = torch.nn.Linear(embed_size, vocab_size)
 
-# Define model parameters (example values, adjust according to your setup)
-vocab_size = 30000  # Adjust based on your tokenizer's vocabulary size
-embed_size = 512    # Size of the embedding vectors
-num_heads = 8       # Number of attention heads
-num_layers = 6      # Number of transformer layers
-hidden_size = 2048  # Size of the hidden layer
+    def forward(self, src, tgt):
+        src = self.embedding(src)
+        tgt = self.embedding(tgt)
+        output = self.transformer(src, tgt)
+        return self.fc(output)
 
-# Initialize the model with the required parameters
-model = TransformerChatbot(vocab_size, embed_size, num_heads, num_layers, hidden_size)
+# Set parameters
+vocab_size = 30000
+embed_size = 512
+num_heads = 8
+num_layers = 6
+hidden_size = 2048
 
-# If your model requires loading pre-trained weights
-# model.load_state_dict(torch.load('path_to_weights'))
+# Initialize the model
+model = SimpleTransformerChatbot(vocab_size, embed_size, num_heads, num_layers, hidden_size)
 
 # Custom print function to handle UnicodeEncodeError
 def safe_print(message):
@@ -49,6 +52,10 @@ def safe_print(message):
     except UnicodeEncodeError:
         # Fall back to handling UnicodeEncodeError
         sys.stdout.buffer.write(message.encode('utf-8') + b'\n')
+
+# Set up the intents
+intents = discord.Intents.default()  # You can modify this based on the required events
+intents.message_content = True  # This intent is required to read the message content
 
 class MyBot(discord.Client):
     async def on_ready(self):
@@ -61,19 +68,21 @@ class MyBot(discord.Client):
         if message.author == self.user:
             return
 
-        # Tokenize the message
         input_text = message.content
         input_tokens = tokenizer.encode(input_text)
-        
-        # Process the input with the model (make a simple response for now)
-        model.eval()  # Set the model to evaluation mode
+        print(f"Input tokens: {input_tokens}")  # Debugging
         input_tensor = torch.tensor(input_tokens).unsqueeze(0)  # Add batch dimension
 
         # Generate a response
         with torch.no_grad():
             response_tensor = model(input_tensor, input_tensor)
-        
-        response = tokenizer.decode(response_tensor[0].tolist())
+
+        if torch.isnan(response_tensor).any() or torch.isinf(response_tensor).any():
+            print("Model output contains NaNs or Infs.")
+            response = "Error in generating response."
+        else:
+            response = tokenizer.decode(response_tensor[0].tolist())
+            print(f"Decoded response: {response}")  # Debugging
 
         # Ensure response length does not exceed 4000 characters
         if len(response) > 4000:
@@ -90,9 +99,6 @@ class MyBot(discord.Client):
         logger.info(f"Generated response: {response}")
 
         await message.channel.send(response)
-
-
-
 
 # Pass intents to the bot initialization
 client = MyBot(intents=intents)
