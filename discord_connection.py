@@ -3,91 +3,124 @@ from model import TransformerChatbot
 from tokenizer import SimpleTokenizer
 import torch
 import logging
-import sys
 from dotenv import load_dotenv
 import os
 from datasets import load_dataset
-from tokenizer import SimpleTokenizer
+import sys
 
-# Load the dataset
-dataset = load_dataset("neifuisan/Neuro-sama-QnA")  # Or whatever dataset you're using
+# Configure system for Unicode support
+sys.stdout.reconfigure(encoding='utf-8', errors='replace')
+sys.stderr.reconfigure(encoding='utf-8', errors='replace')
 
-# Initialize the tokenizer with the dataset
-tokenizer = SimpleTokenizer(dataset)
+# Suppress warnings
+import warnings
+warnings.filterwarnings("ignore")
 
-# Debugging absolute path for .env file
-load_dotenv(dotenv_path="C:/Users/boogi/Documents/Personal Projects/Eva-ai/.env")
+# Disable voice warnings
+discord.voice_client.VoiceClient.warn_nacl = False
 
+# Load environment
+load_dotenv()
 DISCORD_TOKEN = os.getenv("DISCORD_TOKEN")
 
-if not DISCORD_TOKEN:
-    print("DISCORD_TOKEN is not found! Check your .env file.")
-    raise ValueError("DISCORD_TOKEN not found! Check your .env file.")
-else:
-    print(f"DISCORD_TOKEN loaded: {DISCORD_TOKEN[:5]}... (truncated for security)")
-
-# Set up logging
-logging.basicConfig(level=logging.INFO)
-logger = logging.getLogger(__name__)
-
-tokenizer = SimpleTokenizer(dataset)  # Ensure you pass the dataset to the tokenizer
-
-# Set up the intents
-intents = discord.Intents.default()
-intents.message_content = True
-
-# Define model parameters
-vocab_size = 10000
-embed_size = 256
-num_heads = 8
-num_layers = 4
-hidden_size = 512
-
-# Initialize the model
-model = TransformerChatbot(vocab_size, embed_size, num_heads, num_layers, hidden_size)
-
-def safe_print(message):
-    try:
-        print(message)
-    except UnicodeEncodeError:
-        sys.stdout.buffer.write(message.encode('utf-8') + b'\n')
-
 class MyBot(discord.Client):
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        
+        # Initialize tokenizer with dataset
+        self.dataset = load_dataset("neifuisan/Neuro-sama-QnA")
+        self.tokenizer = SimpleTokenizer(self.dataset)
+        
+        # Initialize model
+        self.model = TransformerChatbot(
+            vocab_size=10000,
+            embed_size=256,
+            num_heads=8,
+            num_layers=4,
+            hidden_size=512
+        )
+        self.device = 'cuda' if torch.cuda.is_available() else 'cpu'
+        self.model.to(self.device)
+        self.max_length = 50
+        self.sos_token = 0
+        self.eos_token = 1
+
     async def on_ready(self):
         try:
-            safe_print(f'Logged in as {self.user}')
-        except UnicodeEncodeError:
-            safe_print(f'Logged in as {self.user.name} (UnicodeError)')
-        
-        # Assuming you have a custom model and token-to-word mappings
-    def decode_response(model_output_tensor, vocab):
-        # Convert tensor to indices (e.g., [23, 5, 10])
-        indices = model_output_tensor.argmax(dim=-1).tolist()[0]  
-        
-        # Map indices to words using your vocabulary
-        words = [vocab[index] for index in indices if index in vocab]  
-        
-        # Combine into a sentence
-        return " ".join(words)  
+            user = str(self.user).encode('utf-8', errors='replace').decode('utf-8')
+            print(f'Logged in as {user}')
+        except Exception as e:
+            print(f"Login notification failed: {str(e)}")
 
-    # Usage in your Discord bot
-    async def on_message(message):
-        if message.author == client.user:
+    def predict_response(self, text):
+        """Final fixed version with correct tensor handling"""
+        try:
+            # 1. Prepare source tensor [1, seq_len]
+            src = torch.tensor([self.tokenizer.encode(text)], 
+                             dtype=torch.long).to(self.device)
+            
+            # 2. Initialize target with SOS token [1, 1]
+            tgt = torch.tensor([[self.sos_token]], 
+                             dtype=torch.long).to(self.device)
+            
+            # 3. Generation loop
+            for _ in range(self.max_length):
+                # Ensure proper shapes for transformer [seq_len, batch_size]
+                src_transposed = src.transpose(0, 1)  # [seq_len, 1]
+                tgt_transposed = tgt.transpose(0, 1)  # [seq_len, 1]
+                
+                with torch.no_grad():
+                    output = self.model(src_transposed, tgt_transposed)
+                
+                # Get next token and reshape properly [1, 1]
+                next_token = output.argmax(dim=-1)[-1].view(1, 1)
+                
+                # Stop if EOS token
+                if next_token.item() == self.eos_token:
+                    break
+                
+                # Append to sequence [1, seq_len+1]
+                tgt = torch.cat([tgt, next_token], dim=1)
+            
+            # Convert to text
+            indices = tgt[0, 1:].tolist()  # Skip SOS token
+            words = []
+            for idx in indices:
+                if idx == self.eos_token:
+                    break
+                if hasattr(self.tokenizer, 'idx_to_word'):
+                    word = self.tokenizer.idx_to_word.get(idx, f"[UNK:{idx}]")
+                else:
+                    word = str(idx)  # Fallback
+                words.append(word)
+            return " ".join(words).strip() or "I didn't understand that."
+
+        except Exception as e:
+            logging.error(f"Generation error: {str(e)}", exc_info=True)
+            return "Sorry, I'm having technical difficulties."
+
+    async def on_message(self, message):
+        if message.author == self.user:
             return
 
-        # Get model output (tensor)
-        input_tensor = your_custom_tokenizer(message.content)  
-        output_tensor = your_model.generate(input_tensor)  
+        try:
+            response = self.predict_response(message.content)
+            await message.channel.send(response[:2000])
+        except Exception as e:
+            logging.error(f"Message error: {str(e)}")
+            await message.channel.send("Error processing your message")
 
-        # Decode to text
-        response = decode_response(output_tensor, your_vocab_dict)  
-
-        # Fallback if empty
-        if not response.strip():
-            response = "I didn't understand that."  
-
-        await message.channel.send(response)
-
-
-client = MyBot(intents=intents)
-client.run(DISCORD_TOKEN)
+if __name__ == "__main__":
+    logging.basicConfig(
+        level=logging.INFO,
+        format='%(asctime)s - %(levelname)s - %(message)s',
+        handlers=[
+            logging.FileHandler('bot.log', encoding='utf-8'),
+            logging.StreamHandler(sys.stdout)
+        ]
+    )
+    
+    intents = discord.Intents.default()
+    intents.message_content = True
+    bot = MyBot(intents=intents)
+    bot.run(DISCORD_TOKEN)

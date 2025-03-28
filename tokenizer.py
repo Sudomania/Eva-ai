@@ -1,26 +1,39 @@
 class SimpleTokenizer:
-    def __init__(self, dataset):
-        # Create vocab from dataset
-        self.vocab = set()
-        for text in dataset:
-            self.vocab.update(text.split())  # Simple whitespace-based tokenization
-        self.vocab = {word: idx for idx, word in enumerate(self.vocab)}
-
-    def tokenize(self, text):
-        return [self.vocab[word] for word in text.split()]
-
+    def __init__(self, pad_token="<PAD>", sos_token="<SOS>", eos_token="<EOS>", unk_token="<UNK>"):
+        self.special_tokens = {
+            'pad_token': pad_token,
+            'sos_token': sos_token,
+            'eos_token': eos_token,
+            'unk_token': unk_token
+        }
+        self.word_to_idx = {}
+        self.idx_to_word = {}
+        
+    def build_vocab(self, dataset):
+        # Build vocabulary from dataset
+        vocab = set()
+        for example in dataset:
+            vocab.update(example['input'].split())
+            vocab.update(example['output'].split())
+        
+        # Add special tokens first
+        for i, (key, token) in enumerate(self.special_tokens.items()):
+            self.word_to_idx[token] = i
+            self.idx_to_word[i] = token
+        
+        # Add other words
+        for i, word in enumerate(vocab, start=len(self.special_tokens)):
+            self.word_to_idx[word] = i
+            self.idx_to_word[i] = word
+        
+        self.vocab_size = len(self.word_to_idx)
+    
     def encode(self, text):
-        return [ord(c) for c in text]  # Convert characters to Unicode numbers
-
-    def decode(self, token_ids):
-        # Flatten list in case it's nested
-        if any(isinstance(i, list) for i in token_ids):
-            token_ids = [item for sublist in token_ids for item in sublist]
-
-        # Convert float tokens to integers before calling chr()
-        token_ids = [int(round(tid)) for tid in token_ids]
-
-        # Filter out non-printable characters
-        filtered_tokens = [tid for tid in token_ids if 32 <= tid <= 126]  # Only keep printable ASCII characters
-
-        return ''.join(chr(tid) for tid in filtered_tokens)  # Convert back to text
+        return [
+            self.word_to_idx.get(word, self.word_to_idx[self.special_tokens['unk_token']])
+            for word in text.split()
+        ]
+    
+    @property
+    def pad_token_id(self):
+        return self.word_to_idx[self.special_tokens['pad_token']]
