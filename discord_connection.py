@@ -59,44 +59,32 @@ class MyBot(discord.Client):
         except UnicodeEncodeError:
             safe_print(f'Logged in as {self.user.name} (UnicodeError)')
         
-    async def on_message(self, message):
-        if message.author == self.user:
+        # Assuming you have a custom model and token-to-word mappings
+    def decode_response(model_output_tensor, vocab):
+        # Convert tensor to indices (e.g., [23, 5, 10])
+        indices = model_output_tensor.argmax(dim=-1).tolist()[0]  
+        
+        # Map indices to words using your vocabulary
+        words = [vocab[index] for index in indices if index in vocab]  
+        
+        # Combine into a sentence
+        return " ".join(words)  
+
+    # Usage in your Discord bot
+    async def on_message(message):
+        if message.author == client.user:
             return
 
-        input_text = message.content
-        input_tokens = tokenizer.encode(input_text)
+        # Get model output (tensor)
+        input_tensor = your_custom_tokenizer(message.content)  
+        output_tensor = your_model.generate(input_tensor)  
 
-        # Ensure the model is in evaluation mode
-        model.eval()
-        
-        # Convert input tokens to a tensor and add batch dimension
-        input_tensor = torch.tensor(input_tokens).unsqueeze(0)
+        # Decode to text
+        response = decode_response(output_tensor, your_vocab_dict)  
 
-        with torch.no_grad():
-            response_tensor = model(input_tensor, input_tensor)
-        
-        # Log the raw model output tensor
-        logger.info(f"Raw model response tensor: {response_tensor}")
-
-        # Get the most probable tokens at each position
-        response_ids = torch.argmax(response_tensor, dim=-1)
-
-        # Decode the response tokens into text
-        response = tokenizer.decode(response_ids[0].tolist())
-
-        # Log the decoded response
-        logger.info(f"Decoded response: {response}")
-
-        if len(response) > 4000:
-            response = response[:4000]
-
+        # Fallback if empty
         if not response.strip():
-            response = "I'm sorry, I couldn't generate a response. Please try again later."
-
-        # Sanitize the response (remove any non-printable characters)
-        response = ''.join(c for c in response if 32 <= ord(c) <= 126)
-
-        logger.info(f"Final generated response: {response}")
+            response = "I didn't understand that."  
 
         await message.channel.send(response)
 
