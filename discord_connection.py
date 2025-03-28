@@ -6,6 +6,14 @@ import logging
 import sys
 from dotenv import load_dotenv
 import os
+from datasets import load_dataset
+from tokenizer import SimpleTokenizer
+
+# Load the dataset
+dataset = load_dataset("neifuisan/Neuro-sama-QnA")  # Or whatever dataset you're using
+
+# Initialize the tokenizer with the dataset
+tokenizer = SimpleTokenizer(dataset)
 
 # Debugging absolute path for .env file
 load_dotenv(dotenv_path="C:/Users/boogi/Documents/Personal Projects/Eva-ai/.env")
