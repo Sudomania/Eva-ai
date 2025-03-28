@@ -7,14 +7,17 @@ import sys
 from dotenv import load_dotenv
 import os
 
-load_dotenv()  # Load environment variables from .env file
+print(os.path.abspath(".env"))
+load_dotenv(dotenv_path="C:/Users/boogi/Documents/Personal Projects/Eva-ai/.env")
+
 DISCORD_TOKEN = os.getenv("DISCORD_TOKEN")
+print(f"DISCORD_TOKEN: {DISCORD_TOKEN}")
 
-if DISCORD_TOKEN is None:
-    raise ValueError("DISCORD_TOKEN not found in .env file")
+if not DISCORD_TOKEN:
+    print("DISCORD_TOKEN is not found! Check your .env file.")
+    raise ValueError("DISCORD_TOKEN not found! Check your .env file.")
 else:
-    print(f"Successfully loaded token: {DISCORD_TOKEN}")
-
+    print(f"DISCORD_TOKEN loaded: {DISCORD_TOKEN[:5]}... (truncated for security)")
 
 # Set up logging
 logging.basicConfig(level=logging.INFO)
