@@ -1,7 +1,7 @@
 import discord
 from dotenv import load_dotenv
 import os
-from neuro_model import NeuroSamaModel
+from pygmalion_model import PygmalionModel  # Assuming you created a class for your model
 import json
 from pathlib import Path
 import sys
@@ -24,7 +24,7 @@ class EvaBot(discord.Client):
         self._executor = ThreadPoolExecutor(max_workers=4)
         
         # Initialize model
-        self.model = NeuroSamaModel()
+        self.model = PygmalionModel()  # Replace with your class that handles Pygmalion 7B
         self.creator_id = "sudomane"
         self.memory_file = Path("eva_memory.json")
         self.chat_history = self._load_memory()
@@ -37,7 +37,7 @@ class EvaBot(discord.Client):
 
         # Personality configuration
         self.personality = {
-            "traits": ["playful", "sarcastic", "empathetic"],
+            "traits": ["Playful", "empathetic", "Bratty", "Childish"],
             "style": "Uses informal speech. Never prefixes messages with 'Eva:'. Loves space and astronomy.",
             "creator_response": "Oh hey boss! *salutes* What's the plan today?",
             "response_rules": (
