@@ -95,9 +95,7 @@ class EvaBot(discord.Client):
         """
 
     async def _optimized_generate(self, prompt):
-        """Windows-friendly optimized generation"""
         try:
-            # Check cache first
             if prompt in self._response_cache:
                 cached_time, response = self._response_cache[prompt]
                 if (time.time() - cached_time) < self._cache_expiry:
@@ -109,17 +107,24 @@ class EvaBot(discord.Client):
                     self._executor,
                     lambda: self.model.generate_response(prompt)
                 ),
-                timeout=3.0
+                timeout=10.0
             )
 
-            # Update cache
             self._response_cache[prompt] = (time.time(), response)
+
+            if not response or response.strip() == "":
+                print("⚠️ Empty response detected! Using fallback.")
+                return "Hmm, I'm having trouble thinking. Can you say that again?"
+
             return response
 
         except asyncio.TimeoutError:
-            return "One sec, thinking..."
-        except Exception:
-            return "My circuits glitched! Try again?"
+            print("⚠️ Model response timed out!")
+            return "Sorry, I took too long to think!"
+
+        except Exception as e:
+            print(f"🔴 Error in response generation: {e}")
+            return "Oops, something went wrong while thinking!"
 
     async def on_ready(self):
         print(f'Logged in as {self.user}')
