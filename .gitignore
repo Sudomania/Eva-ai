@@ -16,3 +16,5 @@ env/
 .env
 *.env
 discord_token.env
+models/
+*.gguf
