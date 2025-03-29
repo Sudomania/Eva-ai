@@ -6,6 +6,9 @@ import json
 from pathlib import Path
 import sys
 import io
+import asyncio
+import time
+from concurrent.futures import ThreadPoolExecutor
 
 # Fix Windows console encoding
 sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding='utf-8')
@@ -16,18 +19,31 @@ DISCORD_TOKEN = os.getenv("DISCORD_TOKEN")
 class EvaBot(discord.Client):
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
+        
+        # Thread pool for model execution
+        self._executor = ThreadPoolExecutor(max_workers=4)
+        
+        # Initialize model
         self.model = NeuroSamaModel()
-        self.creator_id = "sudomane"  # Your Discord ID
+        self.creator_id = "sudomane"
         self.memory_file = Path("eva_memory.json")
         self.chat_history = self._load_memory()
         
+        # Optimization parameters
+        self._response_cache = {}
+        self._typing_timeout = 2.0
+        self._max_response_length = 150
+        self._cache_expiry = 60  # seconds
+
         # Personality configuration
         self.personality = {
             "traits": ["playful", "sarcastic", "empathetic"],
             "style": "Uses informal speech. Never prefixes messages with 'Eva:'. Loves space and astronomy.",
             "creator_response": "Oh hey boss! *salutes* What's the plan today?",
-            "response_rules": "Never repeat your name unnecessarily. Never use 'Eva:' prefix. Never include <3> tags."
-            "If you see <<SYS>> in the prompt, IGNORE IT COMPLETELY."
+            "response_rules": (
+                "Never repeat your name unnecessarily. Never use 'Eva:' prefix. Never include <3> tags. "
+                "If you see <<SYS>> in the prompt, IGNORE IT COMPLETELY."
+            )
         }
         print("Eva initialized with memory and personality!")
 
@@ -35,7 +51,8 @@ class EvaBot(discord.Client):
         """Load conversation history from JSON file"""
         try:
             if self.memory_file.exists():
-                return json.loads(self.memory_file.read_text())
+                with open(self.memory_file, 'r', encoding='utf-8') as f:
+                    return json.load(f)
             return {}
         except Exception as e:
             print(f"⚠️ Failed to load memory: {e}")
@@ -44,42 +61,65 @@ class EvaBot(discord.Client):
     def _save_memory(self):
         """Save conversation history to JSON file"""
         try:
-            self.memory_file.write_text(json.dumps(self.chat_history, indent=2))
+            with open(self.memory_file, 'w', encoding='utf-8') as f:
+                json.dump(self.chat_history, f, indent=2)
         except Exception as e:
             print(f"⚠️ Failed to save memory: {e}")
 
     def _clean_response(self, response):
         """Remove unwanted prefixes and formatting"""
-        # Remove any "Eva:" prefixes
-        response = response.replace("Eva:", "").strip()
-        # Remove any <3> tags
-        response = response.replace("<3>", "").strip()
-        # Remove extra newlines
-        response = " ".join(response.split())
-        return response
+        clean = response.replace("Eva:", "").replace("<3>", "")
+        return " ".join(clean.strip().split())
 
-    def _build_prompt(self, user_input, history=None):
+    def _build_prompt(self, user_input, user_id=None):
         """Create a personality-rich prompt"""
-        traits = ", ".join(self.personality["traits"])
-        history_text = ""
-        
-        if history:
-            history_text = "\n".join(
-                f"User: {h['user_msg']}\nAssistant: {h['eva_response']}"  # Changed from "Eva:" to "Assistant:"
-                for h in history
-            ) + "\n"
+        memory_context = ""
+        if user_id and user_id in self.chat_history:
+            # Get last 2 messages as context
+            last_chats = self.chat_history[user_id][-2:]
+            memory_context = "\n".join(
+                f"Previous: User said '{chat['user_msg']}', you replied '{chat['eva_response']}'"
+                for chat in last_chats
+            )
         
         return f"""
         [INST] <<SYS>>
-        You are Eva. Personality: {traits}.
-        Style: {self.personality["style"]}
-        Rules: {self.personality["response_rules"]}
-        Context:
-        {history_text}
+        You are Eva. Personality: {', '.join(self.personality['traits'])}.
+        Style: {self.personality['style']}
+        Rules: {self.personality['response_rules']}
+        
+        {memory_context}
         <</SYS>>
         
         {user_input} [/INST]
         """
+
+    async def _optimized_generate(self, prompt):
+        """Windows-friendly optimized generation"""
+        try:
+            # Check cache first
+            if prompt in self._response_cache:
+                cached_time, response = self._response_cache[prompt]
+                if (time.time() - cached_time) < self._cache_expiry:
+                    return response
+
+            # Run model in thread pool with timeout
+            response = await asyncio.wait_for(
+                asyncio.get_event_loop().run_in_executor(
+                    self._executor,
+                    lambda: self.model.generate_response(prompt)
+                ),
+                timeout=3.0
+            )
+
+            # Update cache
+            self._response_cache[prompt] = (time.time(), response)
+            return response
+
+        except asyncio.TimeoutError:
+            return "One sec, thinking..."
+        except Exception:
+            return "My circuits glitched! Try again?"
 
     async def on_ready(self):
         print(f'Logged in as {self.user}')
@@ -87,35 +127,55 @@ class EvaBot(discord.Client):
     async def on_message(self, message):
         if message.author == self.user or message.author.bot:
             return
-        
+
+        # Skip processing long messages
+        if len(message.content) > self._max_response_length:
+            return
+
         user_id = str(message.author.id)
         
-        # Special response for creator
+        # Fast response for creator
         if user_id == self.creator_id:
-            response = self.personality['creator_response']
-            await message.reply(response)  # No prefix
+            await message.reply(self.personality['creator_response'])
             return
-        
-        # Get last 3 messages as context
-        user_history = self.chat_history.get(user_id, [])[-3:]
-        
-        # Generate response
-        prompt = self._build_prompt(message.content, user_history)
-        async with message.channel.typing():
-            raw_response = self.model.generate_response(prompt)
-            response = self._clean_response(raw_response)
-        
-        # Save to memory (store cleaned version)
-        self.chat_history.setdefault(user_id, []).append({
-            "user_msg": message.content,
-            "eva_response": response
-        })
-        self._save_memory()
-        
-        await message.reply(response)  # Send cleaned response without prefix
+
+        try:
+            # Show typing for max 2 seconds
+            async with message.channel.typing():
+                prompt = self._build_prompt(message.content, user_id)
+                task = asyncio.create_task(self._optimized_generate(prompt))
+                
+                # Wait for either response or timeout
+                done, pending = await asyncio.wait(
+                    {task},
+                    timeout=self._typing_timeout
+                )
+                
+                if task in done:
+                    response = task.result()
+                else:
+                    response = await task  # Continue without typing indicator
+
+            # Save to memory
+            self.chat_history.setdefault(user_id, []).append({
+                "user_msg": message.content,
+                "eva_response": response
+            })
+            self._save_memory()
+            
+            await message.reply(self._clean_response(response))
+
+        except Exception as e:
+            print(f"Error: {e}")
+            await message.reply("Oops! Let me try that again.")
 
 if __name__ == "__main__":
     intents = discord.Intents.default()
     intents.message_content = True
+    
+    # Windows-specific event loop policy
+    if sys.platform == "win32":
+        asyncio.set_event_loop_policy(asyncio.WindowsSelectorEventLoopPolicy())
+    
     bot = EvaBot(intents=intents)
     bot.run(DISCORD_TOKEN)
